@@ -16,7 +16,7 @@ program
 program
   .command('login <token>')
   .description('Autentica o terminal local utilizando seu cliToken da plataforma web')
-  .option('-u, --url <url>', 'URL base da API da plataforma (padrão: http://localhost:3001)')
+  .option('-u, --url <url>', 'URL base da API da plataforma (padrão: http://localhost:3000)')
   .action((token, options) => {
     runLogin(token, options);
   });

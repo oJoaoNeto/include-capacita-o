@@ -4,7 +4,7 @@ import { loginWithToken } from '../api';
 import { saveCliConfig } from '../config';
 
 export async function runLogin(token: string, options: { url?: string }): Promise<void> {
-  const apiUrl = options.url || process.env.CLI_BACKEND_URL || 'http://localhost:3001';
+  const apiUrl = options.url || process.env.CLI_BACKEND_URL || 'http://localhost:3000';
   const spinner = ora('Validando token com a plataforma Capacitação inclu...').start();
 
   try {

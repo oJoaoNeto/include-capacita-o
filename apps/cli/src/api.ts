@@ -4,7 +4,7 @@ import { getCliConfig } from './config';
 
 export function getApiClient() {
   const config = getCliConfig();
-  const baseURL = config?.apiUrl || process.env.CLI_BACKEND_URL || 'http://localhost:3001';
+  const baseURL = config?.apiUrl || process.env.CLI_BACKEND_URL || 'http://localhost:3000';
   const token = config?.cliToken;
 
   return axios.create({
@@ -17,7 +17,7 @@ export function getApiClient() {
   });
 }
 
-export async function loginWithToken(token: string, apiUrl: string = 'http://localhost:3001'): Promise<CliAuthResponse> {
+export async function loginWithToken(token: string, apiUrl: string = 'http://localhost:3000'): Promise<CliAuthResponse> {
   const client = axios.create({
     baseURL: apiUrl,
     headers: {
