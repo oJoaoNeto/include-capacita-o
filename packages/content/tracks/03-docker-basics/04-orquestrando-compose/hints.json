@@ -1,0 +1,4 @@
+[
+  "💡 Para iniciar os serviços em segundo plano, passe a flag '-d' no docker compose.",
+  "💡 Execute dentro da pasta do setup: docker compose up -d"
+]

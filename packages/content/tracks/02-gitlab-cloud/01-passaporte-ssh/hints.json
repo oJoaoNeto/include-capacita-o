@@ -1,0 +1,4 @@
+[
+  "💡 Para ver sua chave pública gerada, rode 'cat ~/.ssh/id_ed25519.pub'.",
+  "💡 Adicione a chave no GitLab (Preferences > SSH Keys) e teste com 'ssh -T git@gitlab.com'."
+]

@@ -1,0 +1,4 @@
+[
+  "💡 Crie um arquivo chamado exatamente '.gitignore' e escreva '.env' dentro dele.",
+  "💡 Rode: echo \".env\" >> .gitignore e confira com 'git status' que o .env desapareceu da lista de pendências."
+]

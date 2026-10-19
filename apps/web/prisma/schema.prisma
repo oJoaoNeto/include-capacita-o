@@ -1,0 +1,101 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  PENDING   // Aguardando aprovação/atribuição de role por um Admin
+  TRAINEE   // Modo Guiado (etapas sequenciais obrigatórias)
+  MEMBER    // Modo Livre (qualquer etapa acessível para estudo)
+  ADMIN     // Gestão de usuários, turmas e acompanhamento
+}
+
+enum ValidationType {
+  CLI_LOCAL
+  GITLAB_API
+}
+
+enum StageStatus {
+  LOCKED
+  IN_PROGRESS
+  COMPLETED
+}
+
+model User {
+  id              String         @id @default(uuid())
+  name            String?
+  email           String         @unique // Usado para pré-cadastro pelo Admin
+  avatarUrl       String?
+  
+  // Preenchidos automaticamente no 1º login via GitLab OAuth
+  gitlabUserId    Int?           @unique
+  gitlabUsername  String?        @unique
+  gitlabToken     String?
+  
+  cliToken        String         @unique @default(uuid())
+  trainingRepoId  Int?           // ID do repositório de treino no GitLab (Trilha 2)
+  
+  role            Role           @default(PENDING)
+  cohort          String?        // Ex: "PS 2026.2", "Membros Efetivos"
+  isActive        Boolean        @default(true)
+  
+  progress        UserProgress[]
+  submissions     Submission[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model Track {
+  id          String   @id @default(uuid())
+  slug        String   @unique // "git-local", "gitlab-cloud", "docker-basics"
+  title       String
+  description String
+  order       Int      @unique
+  stages      Stage[]
+}
+
+model Stage {
+  id             String         @id @default(uuid())
+  trackId        String
+  track          Track          @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  slug           String         @unique // "git-1-1", "gitlab-2-3", etc.
+  stepNumber     Int
+  title          String
+  theoryMd       String         @db.Text
+  missionMd      String         @db.Text
+  hints          String[]
+  validationType ValidationType
+  progress       UserProgress[]
+  submissions    Submission[]
+
+  @@unique([trackId, stepNumber])
+}
+
+model UserProgress {
+  id          String      @id @default(uuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stageId     String
+  stage       Stage       @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  status      StageStatus @default(LOCKED)
+  attempts    Int         @default(0)
+  completedAt DateTime?
+
+  @@unique([userId, stageId])
+}
+
+model Submission {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stageId      String
+  stage        Stage    @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  passed       Boolean
+  feedbackMsg  String   @db.Text
+  rawLogs      String?  @db.Text
+  createdAt    DateTime @default(now())
+}

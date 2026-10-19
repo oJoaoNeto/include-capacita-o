@@ -1,0 +1,6 @@
+{
+  "slug": "gitlab-2-1",
+  "stepNumber": 1,
+  "title": "Passaporte SSH",
+  "validationType": "CLI_LOCAL"
+}

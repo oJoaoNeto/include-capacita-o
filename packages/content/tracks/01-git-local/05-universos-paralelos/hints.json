@@ -1,0 +1,4 @@
+[
+  "💡 O comando para criar uma nova branch e já alternar para ela usa o modificador '-c' no switch ou '-b' no checkout.",
+  "💡 Execute no terminal: git switch -c feat/treino (ou git checkout -b feat/treino)"
+]

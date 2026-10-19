@@ -1,0 +1,4 @@
+[
+  "💡 O nome da branch precisa ser exatamente 'feat/adiciona-membro'.",
+  "💡 Lembre-se de rodar 'git push -u origin feat/adiciona-membro' para enviar a branch até o GitLab."
+]

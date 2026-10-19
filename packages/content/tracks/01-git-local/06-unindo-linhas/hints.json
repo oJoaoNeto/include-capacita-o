@@ -1,0 +1,4 @@
+[
+  "💡 Lembre-se: primeiro você volta para a branch 'main' e depois executa 'git merge feat/treino'.",
+  "💡 Execute: git switch main && git merge feat/treino"
+]

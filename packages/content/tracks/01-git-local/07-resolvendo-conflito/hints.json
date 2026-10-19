@@ -1,0 +1,4 @@
+[
+  "💡 Após editar o arquivo em conflito e apagar os caracteres especiais, você precisa adicionar com 'git add' e rodar 'git commit'.",
+  "💡 Abra o arquivo calculadora.js, limpe os blocos de conflito, salve, e rode: git add calculadora.js && git commit -m \"resolve conflito\"."
+]

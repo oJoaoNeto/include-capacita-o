@@ -1,0 +1,4 @@
+[
+  "💡 Lembre-se que o comando do Git para salvar configurações do usuário começa com 'git config --global'.",
+  "💡 Digite exatamente no terminal: git config --global user.name \"Seu Nome\" e em seguida git config --global user.email \"seu@email.com\"."
+]

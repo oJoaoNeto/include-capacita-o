@@ -1,0 +1,35 @@
+{
+  "name": "inclu-capacitacao-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plataforma de Capacitação Modular Hands-On - Capacitação inclu",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@inclu/web",
+    "dev:web": "npm run dev --workspace=@inclu/web",
+    "build:packages": "npm run build --workspace=@inclu/shared",
+    "build:web": "npm run build --workspace=@inclu/web",
+    "build:cli": "npm run build --workspace=@inclu/cli",
+    "build": "npm run build:packages && npm run build:cli && npm run build:web",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace=@inclu/web",
+    "db:migrate": "npm run db:migrate --workspace=@inclu/web",
+    "db:push": "npm run db:push --workspace=@inclu/web",
+    "db:seed": "npm run db:seed --workspace=@inclu/web",
+    "db:studio": "npm run db:studio --workspace=@inclu/web"
+  },
+  "keywords": [
+    "codecrafters",
+    "git",
+    "gitlab",
+    "docker",
+    "empresa-junior",
+    "capacitacao"
+  ],
+  "author": "inclu",
+  "license": "UNLICENSED"
+}

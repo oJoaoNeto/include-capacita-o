@@ -1,0 +1,4 @@
+[
+  "💡 Após criar o arquivo README.md, você precisa prepará-lo com 'git add' antes de gravar o commit.",
+  "💡 Execute sequencialmente: git add README.md e depois git commit -m \"docs: adiciona README\""
+]

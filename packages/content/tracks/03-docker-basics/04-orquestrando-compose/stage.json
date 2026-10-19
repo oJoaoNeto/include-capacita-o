@@ -1,0 +1,6 @@
+{
+  "slug": "docker-3-4",
+  "stepNumber": 4,
+  "title": "Orquestrando com Compose",
+  "validationType": "CLI_LOCAL"
+}

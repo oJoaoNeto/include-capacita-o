@@ -1,0 +1,4 @@
+[
+  "💡 A flag no docker run para definir variável de ambiente é '-e NOME=VALOR'.",
+  "💡 Execute: docker run -d --name container-trainee -e TRAINEE_EJ=true alpine sleep 3600"
+]

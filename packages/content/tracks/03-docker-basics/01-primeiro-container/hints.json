@@ -1,0 +1,4 @@
+[
+  "💡 Não esqueça do mapeamento de portas: a flag '-p 8080:80' direciona a porta 8080 da sua máquina para a porta 80 interna do container.",
+  "💡 Execute: docker run -d -p 8080:80 --name meu-nginx nginx"
+]

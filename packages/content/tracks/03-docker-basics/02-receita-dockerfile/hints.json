@@ -1,0 +1,4 @@
+[
+  "💡 O comando de build deve conter o ponto final (.) indicando o diretório atual.",
+  "💡 Execute: docker build -t site-ej:v1 ."
+]

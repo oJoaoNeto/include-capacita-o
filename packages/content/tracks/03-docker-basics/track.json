@@ -1,0 +1,6 @@
+{
+  "slug": "docker-basics",
+  "title": "3. Docker Básico",
+  "description": "Empacote e orquestre aplicações e bancos de dados em containers locais sem dor de cabeça.",
+  "order": 3
+}
