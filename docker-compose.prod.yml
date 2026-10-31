@@ -1,0 +1,68 @@
+# ==============================================================================
+# Docker Compose de Produção — Plataforma Capacitação inclu
+# ==============================================================================
+
+services:
+  # 1. Banco de Dados PostgreSQL 16
+  postgres:
+    image: postgres:16-alpine
+    container_name: inclu_capacitacao_db_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${POSTGRES_DB:-inclu_capacitacao}
+    ports:
+      - "127.0.0.1:5432:5432" # Expõe apenas para localhost / proxy interno
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inclu_capacitacao}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - inclu_network
+
+  # 2. Aplicação Web & API Central (Next.js Standalone)
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: inclu_capacitacao_web_prod
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-inclu_capacitacao}?schema=public
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-chave-secreta-producao-substitua-com-openssl-rand-hex-32}
+      GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID}
+      GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET}
+      GITLAB_BOT_TOKEN: ${GITLAB_BOT_TOKEN}
+      GITLAB_TRAINING_GROUP_ID: ${GITLAB_TRAINING_GROUP_ID}
+      ENABLE_GITLAB_MOCK: ${ENABLE_GITLAB_MOCK:-false}
+      ENABLE_DEMO_AUTH: ${ENABLE_DEMO_AUTH:-false}
+      CLI_BACKEND_URL: ${CLI_BACKEND_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - inclu_network
+
+volumes:
+  postgres_prod_data:
+    name: inclu_capacitacao_postgres_data
+
+networks:
+  inclu_network:
+    name: inclu_capacitacao_network
+    driver: bridge

@@ -6,6 +6,9 @@
   "bin": {
     "ej-cap": "./dist/bin/ej-cap.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",

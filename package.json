@@ -18,6 +18,7 @@
     "test": "npm run test --workspaces --if-present",
     "db:generate": "npm run db:generate --workspace=@inclu/web",
     "db:migrate": "npm run db:migrate --workspace=@inclu/web",
+    "db:deploy": "npm run db:deploy --workspace=@inclu/web",
     "db:push": "npm run db:push --workspace=@inclu/web",
     "db:seed": "npm run db:seed --workspace=@inclu/web",
     "db:studio": "npm run db:studio --workspace=@inclu/web"

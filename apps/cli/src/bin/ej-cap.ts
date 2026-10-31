@@ -5,6 +5,7 @@ import { runLogin } from '../commands/login';
 import { runStatus } from '../commands/status';
 import { runSetup } from '../commands/setup';
 import { runVerify } from '../commands/verify';
+import { runConfig } from '../commands/config';
 
 const program = new Command();
 
@@ -40,6 +41,13 @@ program
   .description('Executa as inspeções locais de Git ou Docker e notifica o backend em caso de aprovação')
   .action(() => {
     runVerify();
+  });
+
+program
+  .command('config [action] [value]')
+  .description('Consulta ou altera configurações da CLI (ex: ej-cap config set-url https://...)')
+  .action((action, value) => {
+    runConfig(action, value);
   });
 
 program.parse(process.argv);
