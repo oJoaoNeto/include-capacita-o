@@ -22,13 +22,33 @@ export default async function StageDetailPage({
     redirect(`/login?callbackUrl=${encodeURIComponent(`/tracks/${trackSlug}/${stageSlug}`)}`);
   }
 
-  // 2. Busca o usuário real autenticado
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email.toLowerCase().trim() },
-    include: {
-      progress: true,
-    },
-  });
+  // 2. Busca o usuário autenticado e a trilha em paralelo
+  const [user, track] = await Promise.all([
+    prisma.user.findUnique({
+      where: { email: session.user.email.toLowerCase().trim() },
+      select: {
+        id: true,
+        cliToken: true,
+        role: true,
+        progress: {
+          select: {
+            stageId: true,
+            status: true,
+            attempts: true,
+            completedAt: true,
+          },
+        },
+      },
+    }),
+    prisma.track.findUnique({
+      where: { slug: trackSlug },
+      include: {
+        stages: {
+          orderBy: { stepNumber: 'asc' },
+        },
+      },
+    }),
+  ]);
 
   if (!user) {
     redirect(`/login?callbackUrl=${encodeURIComponent(`/tracks/${trackSlug}/${stageSlug}`)}`);
@@ -45,16 +65,6 @@ export default async function StageDetailPage({
         ? Role.MEMBER
         : Role.TRAINEE
       : user.role;
-
-  // 3. Busca a trilha e valida existência
-  const track = await prisma.track.findUnique({
-    where: { slug: trackSlug },
-    include: {
-      stages: {
-        orderBy: { stepNumber: 'asc' },
-      },
-    },
-  });
 
   if (!track) {
     notFound();

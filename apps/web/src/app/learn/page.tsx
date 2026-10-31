@@ -18,15 +18,43 @@ export default async function LearnDashboardPage({
     redirect('/login?callbackUrl=/learn');
   }
 
-  // 2. Busca o usuário autenticado
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email.toLowerCase().trim() },
-    include: {
-      progress: {
-        include: { stage: true },
+  // 2. Busca o usuário autenticado e as trilhas em paralelo (sem carregar theoryMd/missionMd pesado)
+  const [user, tracks] = await Promise.all([
+    prisma.user.findUnique({
+      where: { email: session.user.email.toLowerCase().trim() },
+      select: {
+        id: true,
+        role: true,
+        progress: {
+          select: {
+            stageId: true,
+            status: true,
+            attempts: true,
+            completedAt: true,
+          },
+        },
       },
-    },
-  });
+    }),
+    prisma.track.findMany({
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        description: true,
+        order: true,
+        stages: {
+          select: {
+            id: true,
+            slug: true,
+            stepNumber: true,
+            title: true,
+          },
+          orderBy: { stepNumber: 'asc' },
+        },
+      },
+      orderBy: { order: 'asc' },
+    }),
+  ]);
 
   if (!user) {
     redirect('/login?callbackUrl=/learn');
@@ -43,16 +71,6 @@ export default async function LearnDashboardPage({
         ? Role.MEMBER
         : Role.TRAINEE
       : user.role;
-
-  // 3. Carrega todas as trilhas ordenadas
-  const tracks = await prisma.track.findMany({
-    include: {
-      stages: {
-        orderBy: { stepNumber: 'asc' },
-      },
-    },
-    orderBy: { order: 'asc' },
-  });
 
   const progressMap = new Map(user.progress.map((p) => [p.stageId, p]));
 

@@ -6,22 +6,75 @@ import { AdminMatrixResponse, MatrixStageColumn, MatrixUserRow } from '@inclu/sh
 export const dynamic = 'force-dynamic';
 
 export default async function AdminPage() {
-  // 1. Carrega todas as turmas
-  const cohortResults = await prisma.user.findMany({
-    where: { cohort: { not: null } },
-    select: { cohort: true },
-    distinct: ['cohort'],
-  });
-  const cohorts = cohortResults.map((c) => c.cohort!).filter(Boolean);
+  // Executa todas as consultas de forma estritamente paralela no PostgreSQL com projeção seletiva
+  const [cohortResults, allStages, users, pendingUsers] = await Promise.all([
+    // 1. Turmas distintas
+    prisma.user.findMany({
+      where: { cohort: { not: null } },
+      select: { cohort: true },
+      distinct: ['cohort'],
+    }),
 
-  // 2. Carrega as 17 etapas
-  const allStages = await prisma.stage.findMany({
-    include: { track: true },
-    orderBy: [
-      { track: { order: 'asc' } },
-      { stepNumber: 'asc' },
-    ],
-  });
+    // 2. Etapas (apenas metadados, sem carregar markdown pesado de theoryMd e missionMd)
+    prisma.stage.findMany({
+      select: {
+        id: true,
+        slug: true,
+        stepNumber: true,
+        title: true,
+        track: {
+          select: {
+            order: true,
+            title: true,
+            slug: true,
+          },
+        },
+      },
+      orderBy: [
+        { track: { order: 'asc' } },
+        { stepNumber: 'asc' },
+      ],
+    }),
+
+    // 3. Usuários ativos (apenas campos necessários do progresso, sem carregar a entidade stage inteira)
+    prisma.user.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        gitlabUsername: true,
+        avatarUrl: true,
+        role: true,
+        cohort: true,
+        progress: {
+          select: {
+            stageId: true,
+            status: true,
+            attempts: true,
+            completedAt: true,
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    }),
+
+    // 4. Usuários pendentes
+    prisma.user.findMany({
+      where: { role: Role.PENDING },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        cohort: true,
+        createdAt: true,
+      },
+    }),
+  ]);
+
+  const cohorts = cohortResults.map((c) => c.cohort!).filter(Boolean);
 
   const stageColumns: MatrixStageColumn[] = allStages.map((s) => ({
     slug: s.slug,
@@ -31,17 +84,6 @@ export default async function AdminPage() {
     trackTitle: s.track.title,
     trackSlug: s.track.slug,
   }));
-
-  // 3. Carrega usuários com progresso
-  const users = await prisma.user.findMany({
-    where: { isActive: true },
-    include: {
-      progress: {
-        include: { stage: true },
-      },
-    },
-    orderBy: { name: 'asc' },
-  });
 
   const formatUserRow = (u: typeof users[0]): MatrixUserRow => {
     const stageMap: Record<string, any> = {};
@@ -83,20 +125,6 @@ export default async function AdminPage() {
     trainees,
     members,
   };
-
-  // 4. Usuários pendentes
-  const pendingUsers = await prisma.user.findMany({
-    where: { role: Role.PENDING },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      cohort: true,
-      createdAt: true,
-    },
-  });
 
   return (
     <AdminDashboardClient

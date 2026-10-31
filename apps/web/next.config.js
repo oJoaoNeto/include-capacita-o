@@ -4,6 +4,8 @@ const nextConfig = {
   transpilePackages: ['@inclu/shared', '@inclu/content'],
   reactStrictMode: true,
   poweredByHeader: false,
+  compress: true,
+  swcMinify: true,
 
   webpack: (config) => {
     // Silencia avisos de pacotes opcionais multiplataforma do @next/swc

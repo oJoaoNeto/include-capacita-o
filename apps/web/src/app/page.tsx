@@ -5,8 +5,19 @@ export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
   const tracks = await prisma.track.findMany({
-    include: {
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      description: true,
+      order: true,
       stages: {
+        select: {
+          id: true,
+          slug: true,
+          stepNumber: true,
+          title: true,
+        },
         orderBy: { stepNumber: 'asc' },
       },
     },
