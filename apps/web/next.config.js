@@ -5,6 +5,12 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
+  webpack: (config) => {
+    // Silencia avisos de pacotes opcionais multiplataforma do @next/swc
+    config.infrastructureLogging = { level: 'error' };
+    return config;
+  },
+
   // Cabeçalhos de Segurança para Produção
   async headers() {
     return [
