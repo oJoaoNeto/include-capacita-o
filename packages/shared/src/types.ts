@@ -91,6 +91,8 @@ export interface MatrixStageColumn {
   stepNumber: number;
   title: string;
   trackOrder: number;
+  trackTitle?: string;
+  trackSlug?: string;
 }
 
 export interface MatrixUserProgressCell {

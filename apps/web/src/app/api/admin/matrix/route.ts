@@ -30,6 +30,8 @@ export async function GET(req: NextRequest) {
       stepNumber: s.stepNumber,
       title: s.title,
       trackOrder: s.track.order,
+      trackTitle: s.track.title,
+      trackSlug: s.track.slug,
     }));
 
     // 3. Monta filtro de usuários

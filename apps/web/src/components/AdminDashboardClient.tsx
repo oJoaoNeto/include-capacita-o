@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { AdminMatrixResponse, MatrixUserRow } from '@inclu/shared';
+import { AdminMatrixResponse, MatrixUserRow, MatrixStageColumn } from '@inclu/shared';
 
 interface AdminDashboardClientProps {
   initialData: AdminMatrixResponse;
@@ -22,22 +22,28 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
   const [pendingList, setPendingList] = useState(initialPending);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Filtros anti-poluição visual (Requisito 3)
-  const [selectedTrackFilter, setSelectedTrackFilter] = useState<'all' | 1 | 2 | 3>('all');
+  // Filtros
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'bottleneck' | 'in_progress' | 'completed'>('all');
-  const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed');
+  const [selectedTrackFilter, setSelectedTrackFilter] = useState<'all' | number>('all');
+  const [displayMode, setDisplayMode] = useState<'cards' | 'table'>('cards');
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Notificações visuais
-  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // Cards expandidos (Accordion vertical)
+  const [expandedUserIds, setExpandedUserIds] = useState<Set<string>>(new Set());
 
-  // Estado do Modal de Auditoria (RF12)
+  // Slide-over Lateral (Drawer Inspector de Integrante)
+  const [inspectUser, setInspectUser] = useState<MatrixUserRow | null>(null);
+
+  // Estado do Modal de Auditoria de Submissões (RF12)
   const [auditUser, setAuditUser] = useState<MatrixUserRow | null>(null);
   const [auditStageSlug, setAuditStageSlug] = useState<string | null>(null);
   const [auditSubmissions, setAuditSubmissions] = useState<any[]>([]);
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
+
+  // Toast Feedback
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Form de Pré-Cadastro
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -60,17 +66,47 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
       setMatrixData(data);
     } catch (err) {
       console.error(err);
-      showToast('Erro ao atualizar matriz da empresa.', 'error');
+      showToast('Erro ao atualizar dados da empresa.', 'error');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Alteração de Papel / Promoção de Trainee a Membro (Requisito 6)
+  // Agrupamento dinâmico de etapas por Trilha
+  const trackGroups = useMemo(() => {
+    const map = new Map<number, { order: number; title: string; slug: string; stages: MatrixStageColumn[] }>();
+    for (const st of matrixData.stages) {
+      if (!map.has(st.trackOrder)) {
+        let defaultTitle = `Trilha ${st.trackOrder}`;
+        let defaultSlug = `track-${st.trackOrder}`;
+        if (st.trackOrder === 1) {
+          defaultTitle = 'Git Local & Resolução de Conflitos';
+          defaultSlug = 'git-local';
+        } else if (st.trackOrder === 2) {
+          defaultTitle = 'GitLab Workflow & Code Review';
+          defaultSlug = 'gitlab-cloud';
+        } else if (st.trackOrder === 3) {
+          defaultTitle = 'Docker & Ambientes Multi-Serviço';
+          defaultSlug = 'docker-basics';
+        }
+
+        map.set(st.trackOrder, {
+          order: st.trackOrder,
+          title: st.trackTitle || defaultTitle,
+          slug: st.trackSlug || defaultSlug,
+          stages: [],
+        });
+      }
+      map.get(st.trackOrder)!.stages.push(st);
+    }
+    return Array.from(map.values()).sort((a, b) => a.order - b.order);
+  }, [matrixData.stages]);
+
+  // Promoção / Mudança de Cargo
   const handleChangeUserRole = async (userId: string, newRole: 'TRAINEE' | 'MEMBER' | 'ADMIN', userName?: string) => {
     const roleLabel = newRole === 'MEMBER' ? 'Membro Efetivo' : newRole === 'ADMIN' ? 'Admin' : 'Trainee';
     const confirm = window.confirm(
-      `Deseja realmente alterar o cargo de ${userName || 'este usuário'} para ${roleLabel}?`
+      `Deseja alterar o cargo de ${userName || 'este integrante'} para ${roleLabel}?`
     );
     if (!confirm) return;
 
@@ -82,10 +118,10 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
       });
 
       if (res.ok) {
-        showToast(`🎉 ${userName || 'Usuário'} agora é ${roleLabel}! As permissões foram sincronizadas.`);
+        showToast(`🎉 ${userName || 'Usuário'} agora é ${roleLabel}! As etapas foram sincronizadas.`);
         await fetchMatrix(selectedCohort);
-        if (auditUser?.userId === userId) {
-          setAuditUser((prev) => (prev ? { ...prev, role: newRole as any } : null));
+        if (inspectUser?.userId === userId) {
+          setInspectUser((prev) => (prev ? { ...prev, role: newRole as any } : null));
         }
       } else {
         const errData = await res.json();
@@ -156,16 +192,47 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
     }
   };
 
-  // Colunas de etapas filtradas (reduz drasticamente o overflow horizontal)
-  const filteredStageColumns = useMemo(() => {
-    if (selectedTrackFilter === 'all') return matrixData.stages;
-    return matrixData.stages.filter((s) => s.trackOrder === selectedTrackFilter);
-  }, [matrixData.stages, selectedTrackFilter]);
+  // Alternador do Accordion (Expandir / Recolher Card)
+  const toggleUserExpanded = (userId: string) => {
+    setExpandedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
 
-  // Filtra e pagina os Trainees
+  const expandAll = () => {
+    const list = activeTab === 'trainees' ? filteredTrainees : filteredMembers;
+    setExpandedUserIds(new Set(list.map((u) => u.userId)));
+  };
+
+  const collapseAll = () => {
+    setExpandedUserIds(new Set());
+  };
+
+  // Helper para computar estatísticas de uma trilha específica para um usuário
+  const getUserTrackStats = (u: MatrixUserRow, track: { order: number; stages: MatrixStageColumn[] }) => {
+    const total = track.stages.length;
+    const completed = track.stages.filter((s) => u.stages[s.slug]?.status === 'COMPLETED').length;
+    const inProgress = track.stages.filter((s) => u.stages[s.slug]?.status === 'IN_PROGRESS').length;
+    const bottlenecks = track.stages.filter((s) => u.stages[s.slug]?.hasCriticalFailures).length;
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return { total, completed, inProgress, bottlenecks, percent };
+  };
+
+  // Helper para ícones de trilha
+  const getTrackIcon = (order: number) => {
+    if (order === 1) return '🌱';
+    if (order === 2) return '🦊';
+    if (order === 3) return '🐳';
+    return '⚡';
+  };
+
+  // Filtra Trainees
   const filteredTrainees = useMemo(() => {
     return matrixData.trainees.filter((u) => {
-      // 1. Busca por nome, email ou gitlab
       const query = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !query ||
@@ -175,7 +242,6 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
 
       if (!matchesSearch) return false;
 
-      // 2. Filtro de situação
       const stagesList = Object.values(u.stages);
       const completedCount = stagesList.filter((s) => s.status === 'COMPLETED').length;
       const hasBottleneck = stagesList.some((s) => s.hasCriticalFailures);
@@ -188,7 +254,7 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
     });
   }, [matrixData.trainees, matrixData.stages.length, searchQuery, statusFilter]);
 
-  // Filtra e pagina os Membros
+  // Filtra Membros
   const filteredMembers = useMemo(() => {
     return matrixData.members.filter((u) => {
       const query = searchQuery.toLowerCase().trim();
@@ -209,7 +275,7 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
   }, [activeUserList, currentPage, pageSize]);
 
   return (
-    <div className="flex-1 max-w-7xl mx-auto px-4 py-8 w-full space-y-6">
+    <div className="flex-1 max-w-7xl mx-auto px-4 py-8 w-full space-y-6 overflow-x-hidden">
       {/* Toast Notification */}
       {toastMessage && (
         <div
@@ -223,19 +289,19 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
         </div>
       )}
 
-      {/* Top Header - Renomeado para Gestão da Empresa (Requisito 2) */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1b2234] pb-6">
         <div>
           <span className="text-[10px] font-mono font-bold text-purple-400 uppercase tracking-wider bg-purple-950/60 px-2.5 py-1 rounded border border-purple-800/40">
-            Painel Administrativo da Empresa
+            Painel da Empresa
           </span>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Gestão da Empresa</h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Acompanhamento de turmas, promoção de trainees a membros e gestão da matriz de competências.
+            Acompanhe o progresso por trilhas, identifique gargalos e promova trainees a membros sem poluição visual.
           </p>
         </div>
 
-        {/* Filtro por Turma (Cohort) */}
+        {/* Filtro por Turma */}
         <div className="flex items-center space-x-2">
           <label className="text-xs font-mono text-slate-400">Turma:</label>
           <select
@@ -321,10 +387,10 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
         </button>
       </div>
 
-      {/* Conteúdo das Tabs de Trainees e Membros (com Barra de Filtros Anti-Poluição) */}
+      {/* Conteúdo das Tabs de Trainees e Membros (Design Responsivo Sem Scroll Lateral) */}
       {(activeTab === 'trainees' || activeTab === 'members') && (
         <div className="space-y-4">
-          {/* Barra de Filtros e Busca (Requisito 3) */}
+          {/* Barra de Filtros e Busca Responsiva */}
           <div className="bg-[#0e1422] border border-[#1b2234] rounded-xl p-4 space-y-3">
             <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
               {/* Campo de Busca */}
@@ -337,14 +403,14 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
                     setSearchQuery(e.target.value);
                     setCurrentPage(1);
                   }}
-                  placeholder="Filtrar por nome, e-mail ou GitLab..."
+                  placeholder="Buscar integrante por nome, email ou gitlab..."
                   className="w-full bg-[#080c14] border border-[#202b42] focus:border-emerald-500 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 font-mono"
                 />
               </div>
 
-              {/* Filtro de Trilhas (Reduz as 17 colunas) */}
+              {/* Filtro por Trilha */}
               <div className="flex items-center gap-1.5 flex-wrap text-xs font-mono">
-                <span className="text-slate-500 text-[11px] mr-1">Colunas:</span>
+                <span className="text-slate-500 text-[11px] mr-1">Focar Trilha:</span>
                 <button
                   onClick={() => setSelectedTrackFilter('all')}
                   className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
@@ -353,263 +419,472 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
                       : 'bg-[#080c14] border-[#1b2234] text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Todas (17)
+                  Todas ({trackGroups.length})
                 </button>
-                <button
-                  onClick={() => setSelectedTrackFilter(1)}
-                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
-                    selectedTrackFilter === 1
-                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold'
-                      : 'bg-[#080c14] border-[#1b2234] text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  🌱 Git (7)
-                </button>
-                <button
-                  onClick={() => setSelectedTrackFilter(2)}
-                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
-                    selectedTrackFilter === 2
-                      ? 'bg-orange-500/20 border-orange-500/40 text-orange-300 font-bold'
-                      : 'bg-[#080c14] border-[#1b2234] text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  🦊 GitLab (4)
-                </button>
-                <button
-                  onClick={() => setSelectedTrackFilter(3)}
-                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
-                    selectedTrackFilter === 3
-                      ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 font-bold'
-                      : 'bg-[#080c14] border-[#1b2234] text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  🐳 Docker (6)
-                </button>
+                {trackGroups.map((tg) => (
+                  <button
+                    key={tg.order}
+                    onClick={() => setSelectedTrackFilter(tg.order)}
+                    className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
+                      selectedTrackFilter === tg.order
+                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-[#080c14] border-[#1b2234] text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {getTrackIcon(tg.order)} T{tg.order}
+                  </button>
+                ))}
               </div>
 
-              {/* Alternador de Modo: Compacto vs Matriz Completa */}
+              {/* Alternador de Modo: Cards Verticais vs Tabela Sintética */}
               <div className="flex items-center gap-2 self-end md:self-auto text-xs font-mono">
                 <button
-                  onClick={() => setViewMode(viewMode === 'detailed' ? 'compact' : 'detailed')}
-                  className="px-2.5 py-1 bg-[#141b2c] hover:bg-[#1a233a] border border-[#202b42] text-slate-300 rounded text-[11px] transition-colors"
+                  onClick={() => setDisplayMode('cards')}
+                  title="Visão em Cards Verticais Expansíveis (Zero Scroll Lateral)"
+                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
+                    displayMode === 'cards'
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 font-bold'
+                      : 'bg-[#080c14] border-[#1b2234] text-slate-400 hover:text-slate-200'
+                  }`}
                 >
-                  {viewMode === 'detailed' ? 'Modo Compacto' : 'Matriz Completa'}
+                  ⊞ Cards Expansíveis
+                </button>
+                <button
+                  onClick={() => setDisplayMode('table')}
+                  title="Visão em Tabela Sintética de Trilhas"
+                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors ${
+                    displayMode === 'table'
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 font-bold'
+                      : 'bg-[#080c14] border-[#1b2234] text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  ☰ Tabela Sintética
                 </button>
               </div>
             </div>
 
-            {/* Sub-barra: Legenda e Filtro de Gargalos */}
+            {/* Sub-barra: Situação, Ações em Massa e Paginação */}
             <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-[#162033] gap-2">
-              <div className="flex items-center space-x-3 flex-wrap">
-                <span className="flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>Concluído</span>
-                </span>
-                <span className="flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  <span>Em Andamento</span>
-                </span>
-                <span className="flex items-center space-x-1.5 text-red-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  <span>Gargalo (≥ 3 falhas)</span>
-                </span>
+              <div className="flex items-center space-x-2 flex-wrap">
+                <span className="text-slate-500">Situação:</span>
+                <button
+                  onClick={() => setStatusFilter('all')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono ${
+                    statusFilter === 'all' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  onClick={() => setStatusFilter('bottleneck')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono flex items-center gap-1 ${
+                    statusFilter === 'bottleneck'
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/40 font-bold'
+                      : 'text-red-400/80 hover:text-red-300'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                  <span>Com Gargalos (≥3 falhas)</span>
+                </button>
+                <button
+                  onClick={() => setStatusFilter('completed')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono ${
+                    statusFilter === 'completed'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  100% Concluídos
+                </button>
               </div>
 
+              {displayMode === 'cards' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={expandAll}
+                    className="text-[10px] text-slate-400 hover:text-emerald-400 font-mono transition-colors"
+                  >
+                    [Expandir Todos]
+                  </button>
+                  <span className="text-slate-600">|</span>
+                  <button
+                    onClick={collapseAll}
+                    className="text-[10px] text-slate-400 hover:text-emerald-400 font-mono transition-colors"
+                  >
+                    [Recolher Todos]
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center gap-2">
-                <span className="text-slate-500">Exibir:</span>
+                <span className="text-slate-500 font-mono">Por pág:</span>
                 <select
                   value={pageSize}
                   onChange={(e) => {
                     setPageSize(Number(e.target.value));
                     setCurrentPage(1);
                   }}
-                  className="bg-[#080c14] border border-[#1b2234] rounded px-2 py-0.5 text-slate-300 text-[10px]"
+                  className="bg-[#080c14] border border-[#1b2234] rounded px-2 py-0.5 text-slate-300 text-[10px] font-mono"
                 >
-                  <option value={10}>10 por página</option>
-                  <option value={25}>25 por página</option>
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
                   <option value={100}>Todos</option>
                 </select>
-                <span className="text-slate-500">
-                  Total: {activeUserList.length}
-                </span>
+                <span className="text-slate-500 font-mono">Total: {activeUserList.length}</span>
               </div>
             </div>
           </div>
 
-          {/* Tabela de Trainees ou Membros */}
-          <div className="border border-[#1b2234] rounded-xl overflow-x-auto bg-[#0e1422] shadow-xl">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-[#0a0f1a] border-b border-[#1b2234] text-slate-300">
-                  <th className="p-3 font-bold sticky left-0 bg-[#0a0f1a] z-10 w-52 shadow-md">
-                    {activeTab === 'trainees' ? 'Trainee' : 'Membro'}
-                  </th>
-                  <th className="p-3 font-semibold text-slate-400 font-mono text-[11px]">Turma</th>
-                  <th className="p-3 font-semibold text-slate-400 font-mono text-[11px] min-w-[140px]">
-                    Progresso Geral
-                  </th>
+          {/* ======================================================== */}
+          {/* MODO 1: CARDS RESPONSIVOS VERTICAIS (ZERO SCROLL LATERAL) */}
+          {/* ======================================================== */}
+          {displayMode === 'cards' && (
+            <div className="space-y-3">
+              {paginatedUsers.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 font-mono text-xs bg-[#0e1422] border border-[#1b2234] rounded-xl">
+                  Nenhum integrante encontrado com os filtros selecionados.
+                </div>
+              ) : (
+                paginatedUsers.map((u) => {
+                  const isExpanded = expandedUserIds.has(u.userId);
+                  const stagesList = Object.values(u.stages);
+                  const totalStages = matrixData.stages.length;
+                  const completedTotal = stagesList.filter((s) => s.status === 'COMPLETED').length;
+                  const overallPercent = totalStages > 0 ? Math.round((completedTotal / totalStages) * 100) : 0;
+                  const totalBottlenecks = stagesList.filter((s) => s.hasCriticalFailures).length;
 
-                  {/* Colunas de Etapas (Apenas no Modo Detalhado) */}
-                  {viewMode === 'detailed' &&
-                    filteredStageColumns.map((st) => (
-                      <th
-                        key={st.slug}
-                        className="p-2 font-mono text-center border-l border-[#162033] min-w-[44px]"
-                        title={st.title}
-                      >
-                        <span className="block text-[9px] text-slate-500">T{st.trackOrder}</span>
-                        <span className="text-[11px] text-slate-300">{st.stepNumber}</span>
-                      </th>
-                    ))}
-
-                  {/* Coluna de Ações Administrativas (Requisito 6) */}
-                  <th className="p-3 font-semibold text-slate-300 font-mono text-right min-w-[160px]">
-                    Ações de Cargo
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-[#162033] text-slate-300">
-                {paginatedUsers.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={(viewMode === 'detailed' ? filteredStageColumns.length : 0) + 4}
-                      className="p-8 text-center text-slate-500 font-mono text-xs"
+                  return (
+                    <div
+                      key={u.userId}
+                      className="bg-[#0e1422] border border-[#1b2234] hover:border-[#24314c] rounded-xl overflow-hidden transition-all duration-200 shadow-lg"
                     >
-                      Nenhum integrante encontrado com os filtros selecionados.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedUsers.map((u) => {
-                    const stagesList = Object.values(u.stages);
-                    const completedCount = stagesList.filter((s) => s.status === 'COMPLETED').length;
-                    const percent = Math.round((completedCount / (matrixData.stages.length || 1)) * 100);
-
-                    return (
-                      <tr key={u.userId} className="hover:bg-[#121929] transition-colors">
-                        <td className="p-3 font-semibold text-white sticky left-0 bg-[#0e1422] z-10 shadow-md">
-                          <div className="font-medium truncate max-w-[190px]">{u.name || u.email}</div>
-                          <div className="text-[10px] text-slate-500 font-mono truncate max-w-[190px]">
-                            {u.email}
+                      {/* Linha Principal do Integrante (Responsiva) */}
+                      <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        {/* Identidade */}
+                        <div className="flex items-center space-x-3 min-w-[240px]">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#162033] to-[#202d47] border border-[#263554] flex items-center justify-center text-sm font-bold text-slate-200 font-mono flex-shrink-0">
+                            {u.name ? u.name.charAt(0).toUpperCase() : u.email.charAt(0).toUpperCase()}
                           </div>
-                          {u.gitlabUsername && (
-                            <div className="text-[10px] text-orange-400/80 font-mono">
-                              @{u.gitlabUsername}
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="p-3 text-slate-400 text-[11px] font-mono whitespace-nowrap">
-                          {u.cohort || '—'}
-                        </td>
-
-                        {/* Coluna Resumo de Progresso */}
-                        <td className="p-3 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between text-[10px] font-mono">
-                              <span className="text-slate-400">
-                                {completedCount}/{matrixData.stages.length}
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-sm font-bold text-white truncate max-w-[200px]">
+                                {u.name || u.email}
+                              </h3>
+                              <span className="text-[10px] font-mono px-2 py-0.2 rounded border border-[#202b42] text-slate-400 bg-[#121929] whitespace-nowrap">
+                                {u.cohort || 'Sem turma'}
                               </span>
-                              <span className="text-emerald-400 font-bold">{percent}%</span>
                             </div>
-                            <div className="w-full bg-[#162033] rounded-full h-1.5 overflow-hidden">
-                              <div
-                                className="bg-gradient-to-r from-emerald-500 to-cyan-500 h-1.5 rounded-full"
-                                style={{ width: `${percent}%` }}
-                              />
+                            <div className="text-[11px] text-slate-500 font-mono truncate max-w-[240px]">
+                              {u.email}
                             </div>
+                            {u.gitlabUsername && (
+                              <div className="text-[10px] text-orange-400/90 font-mono">
+                                @{u.gitlabUsername}
+                              </div>
+                            )}
                           </div>
-                        </td>
+                        </div>
 
-                        {/* Células de Etapas (Modo Detalhado) */}
-                        {viewMode === 'detailed' &&
-                          filteredStageColumns.map((st) => {
-                            const cell = u.stages[st.slug];
-                            const isCompleted = cell?.status === 'COMPLETED';
-                            const isInProgress = cell?.status === 'IN_PROGRESS';
-                            const hasAlert = cell?.hasCriticalFailures;
+                        {/* Progresso Geral */}
+                        <div className="min-w-[180px] space-y-1">
+                          <div className="flex items-center justify-between text-xs font-mono">
+                            <span className="text-slate-400">Progresso Geral:</span>
+                            <span className="text-emerald-400 font-bold">
+                              {completedTotal}/{totalStages} ({overallPercent}%)
+                            </span>
+                          </div>
+                          <div className="w-full bg-[#162033] rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-gradient-to-r from-emerald-500 to-cyan-500 h-2 rounded-full transition-all duration-500"
+                              style={{ width: `${overallPercent}%` }}
+                            />
+                          </div>
+                        </div>
 
-                            return (
-                              <td
-                                key={st.slug}
-                                onClick={() => openAuditModal(u, st.slug)}
-                                className="p-1.5 text-center border-l border-[#162033] cursor-pointer hover:bg-[#192338] transition-colors"
-                              >
-                                {hasAlert ? (
-                                  <div
-                                    className="relative inline-flex items-center justify-center w-6 h-6 rounded bg-red-500/20 text-red-400 border border-red-500 font-bold text-[10px] animate-pulse"
-                                    title="Trainee travado: 3+ falhas consecutivas"
-                                  >
-                                    🔴 {cell.attempts}
-                                  </div>
-                                ) : isCompleted ? (
-                                  <div
-                                    className="inline-flex items-center justify-center w-6 h-6 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-[10px]"
-                                    title="Concluído com sucesso"
-                                  >
-                                    ✔
-                                  </div>
-                                ) : isInProgress ? (
-                                  <div
-                                    className="inline-flex items-center justify-center w-6 h-6 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono text-[10px]"
-                                    title={`Em andamento (${cell?.attempts || 0} tentativas)`}
-                                  >
-                                    {cell?.attempts || '•'}
-                                  </div>
-                                ) : (
-                                  <div
-                                    className="inline-flex items-center justify-center w-6 h-6 rounded bg-[#121929] text-slate-600 text-[10px]"
-                                    title="Bloqueado"
-                                  >
-                                    🔒
-                                  </div>
-                                )}
-                              </td>
-                            );
-                          })}
+                        {/* Pílulas Resumo das Trilhas (NUNCA dá scroll horizontal) */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {trackGroups
+                            .filter((tg) => selectedTrackFilter === 'all' || selectedTrackFilter === tg.order)
+                            .map((tg) => {
+                              const stats = getUserTrackStats(u, tg);
+                              const isFinished = stats.completed === stats.total;
+                              const hasError = stats.bottlenecks > 0;
 
-                        {/* Ações de Mudança de Papel (Requisito 6) */}
-                        <td className="p-3 text-right whitespace-nowrap">
+                              return (
+                                <div
+                                  key={tg.order}
+                                  className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 ${
+                                    isFinished
+                                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                      : hasError
+                                      ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                                      : 'bg-[#121929] border-[#1e2940] text-slate-300'
+                                  }`}
+                                  title={`${tg.title}: ${stats.completed}/${stats.total} concluídas`}
+                                >
+                                  <span>{getTrackIcon(tg.order)}</span>
+                                  <span className="font-semibold">{stats.percent}%</span>
+                                  <span className="text-slate-500 text-[10px]">
+                                    ({stats.completed}/{stats.total})
+                                  </span>
+                                  {isFinished && <span className="text-emerald-400 text-xs">✔</span>}
+                                  {hasError && <span className="text-red-400 text-xs animate-pulse">🔴</span>}
+                                </div>
+                              );
+                            })}
+
+                          {totalBottlenecks > 0 && (
+                            <span className="px-2 py-0.5 rounded bg-red-950/60 border border-red-800 text-red-400 text-[10px] font-mono font-bold animate-pulse">
+                              {totalBottlenecks} {totalBottlenecks === 1 ? 'gargalo' : 'gargalos'}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Ações */}
+                        <div className="flex items-center gap-2 self-end lg:self-auto flex-wrap">
                           {activeTab === 'trainees' ? (
                             <button
                               onClick={() => handleChangeUserRole(u.userId, 'MEMBER', u.name || u.email)}
-                              className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-[#080c14] border border-emerald-500/30 rounded-lg text-xs font-mono font-medium transition-all"
-                              title="Promover Trainee para Membro Efetivo da Empresa"
+                              className="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-[#080c14] border border-emerald-500/30 rounded-lg text-xs font-mono font-medium transition-all"
+                              title="Promover a Membro Efetivo da Empresa"
                             >
                               🎓 Promover a Membro
                             </button>
                           ) : (
-                            <div className="inline-flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleChangeUserRole(u.userId, 'TRAINEE', u.name || u.email)}
+                              className="px-2.5 py-1.5 bg-[#141b2c] hover:bg-blue-950/60 text-slate-300 hover:text-blue-300 border border-[#202b42] rounded-lg text-xs font-mono transition-colors"
+                              title="Reverter para modo Trainee"
+                            >
+                              Virar Trainee
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => setInspectUser(u)}
+                            className="px-2.5 py-1.5 bg-[#121929] hover:bg-[#1a253d] border border-[#1e2a42] text-slate-300 rounded-lg text-xs font-mono transition-colors"
+                            title="Inspecionar ficha completa deste integrante"
+                          >
+                            🔍 Inspecionar
+                          </button>
+
+                          <button
+                            onClick={() => toggleUserExpanded(u.userId)}
+                            className="px-2.5 py-1.5 bg-[#141b2c] hover:bg-[#1a233a] border border-[#202b42] text-slate-200 rounded-lg text-xs font-mono transition-colors flex items-center gap-1"
+                            title={isExpanded ? 'Recolher detalhes' : 'Ver micro-etapas deste integrante'}
+                          >
+                            <span>Atividades</span>
+                            <span className="text-[10px]">{isExpanded ? '▲' : '▼'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Área Expansível (Vertical & 100% Responsiva) */}
+                      {isExpanded && (
+                        <div className="bg-[#090d18] border-t border-[#1b2234] p-4 sm:p-5 space-y-4 animate-in fade-in-50 duration-200">
+                          <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-[#162033] pb-2">
+                            <span>
+                              Grade de Micro-Etapas Práticas • Clique em qualquer etapa para ver submissões e logs:
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              (🟢 Concluído | 🔵 Em andamento | 🔴 Gargalo | 🔒 Bloqueado)
+                            </span>
+                          </div>
+
+                          <div className="space-y-4">
+                            {trackGroups
+                              .filter((tg) => selectedTrackFilter === 'all' || selectedTrackFilter === tg.order)
+                              .map((tg) => {
+                                const stats = getUserTrackStats(u, tg);
+
+                                return (
+                                  <div
+                                    key={tg.order}
+                                    className="bg-[#0e1422] border border-[#182236] rounded-xl p-3.5 space-y-2.5"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center space-x-2">
+                                        <span className="text-base">{getTrackIcon(tg.order)}</span>
+                                        <h4 className="text-xs font-bold text-white font-mono">
+                                          Trilha {tg.order}: {tg.title}
+                                        </h4>
+                                      </div>
+                                      <span className="text-[11px] font-mono text-slate-400">
+                                        {stats.completed}/{stats.total} concluídas ({stats.percent}%)
+                                      </span>
+                                    </div>
+
+                                    {/* Badges de Etapas que quebram de linha naturalmente (flex-wrap) */}
+                                    <div className="flex flex-wrap gap-2 pt-1">
+                                      {tg.stages.map((st) => {
+                                        const cell = u.stages[st.slug];
+                                        const isCompleted = cell?.status === 'COMPLETED';
+                                        const isInProgress = cell?.status === 'IN_PROGRESS';
+                                        const hasAlert = cell?.hasCriticalFailures;
+
+                                        return (
+                                          <button
+                                            key={st.slug}
+                                            onClick={() => openAuditModal(u, st.slug)}
+                                            className={`px-2.5 py-1.5 rounded-lg border text-left transition-all text-xs font-mono flex items-center gap-1.5 ${
+                                              hasAlert
+                                                ? 'bg-red-500/20 hover:bg-red-500/30 border-red-500 text-red-300 animate-pulse'
+                                                : isCompleted
+                                                ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-300'
+                                                : isInProgress
+                                                ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-300'
+                                                : 'bg-[#121929] hover:bg-[#162033] border-[#1e2940] text-slate-500'
+                                            }`}
+                                            title={`${st.stepNumber}. ${st.title} (${cell?.attempts || 0} tentativas)`}
+                                          >
+                                            <span className="font-bold">
+                                              {st.stepNumber}
+                                            </span>
+                                            <span className="max-w-[130px] truncate hidden sm:inline text-[11px]">
+                                              {st.title}
+                                            </span>
+                                            {isCompleted && <span className="text-emerald-400 text-xs">✔</span>}
+                                            {hasAlert && <span className="text-red-400 text-xs font-bold">🔴 {cell.attempts}x</span>}
+                                            {!isCompleted && !hasAlert && isInProgress && (
+                                              <span className="text-blue-400 text-[10px]">({cell?.attempts || 0}x)</span>
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* MODO 2: TABELA SINTÉTICA POR TRILHAS (NUNCA ROLA INFINITO)*/}
+          {/* ======================================================== */}
+          {displayMode === 'table' && (
+            <div className="border border-[#1b2234] rounded-xl overflow-hidden bg-[#0e1422] shadow-xl w-full">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-[#0a0f1a] border-b border-[#1b2234] text-slate-300 font-mono">
+                    <th className="p-3 font-bold w-1/4">Integrante</th>
+                    <th className="p-3 font-semibold text-slate-400">Turma</th>
+                    <th className="p-3 font-semibold text-slate-400">Progresso Global</th>
+                    {trackGroups.map((tg) => (
+                      <th key={tg.order} className="p-3 font-semibold text-slate-300 text-center">
+                        {getTrackIcon(tg.order)} Trilha {tg.order}
+                      </th>
+                    ))}
+                    <th className="p-3 font-semibold text-slate-300 text-right">Ações</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-[#162033] text-slate-300">
+                  {paginatedUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={4 + trackGroups.length} className="p-8 text-center text-slate-500 font-mono text-xs">
+                        Nenhum integrante encontrado.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedUsers.map((u) => {
+                      const stagesList = Object.values(u.stages);
+                      const totalStages = matrixData.stages.length;
+                      const completedTotal = stagesList.filter((s) => s.status === 'COMPLETED').length;
+                      const overallPercent = totalStages > 0 ? Math.round((completedTotal / totalStages) * 100) : 0;
+
+                      return (
+                        <tr key={u.userId} className="hover:bg-[#121929] transition-colors">
+                          <td className="p-3 font-semibold text-white">
+                            <div className="font-medium truncate max-w-[190px]">{u.name || u.email}</div>
+                            <div className="text-[10px] text-slate-500 font-mono truncate max-w-[190px]">{u.email}</div>
+                          </td>
+
+                          <td className="p-3 text-slate-400 text-[11px] font-mono whitespace-nowrap">
+                            {u.cohort || '—'}
+                          </td>
+
+                          <td className="p-3">
+                            <div className="space-y-1 w-28">
+                              <div className="flex items-center justify-between text-[10px] font-mono">
+                                <span className="text-slate-400">{completedTotal}/{totalStages}</span>
+                                <span className="text-emerald-400 font-bold">{overallPercent}%</span>
+                              </div>
+                              <div className="w-full bg-[#162033] rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-emerald-500 h-1.5 rounded-full"
+                                  style={{ width: `${overallPercent}%` }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+
+                          {trackGroups.map((tg) => {
+                            const stats = getUserTrackStats(u, tg);
+                            const isFinished = stats.completed === stats.total;
+                            const hasError = stats.bottlenecks > 0;
+
+                            return (
+                              <td key={tg.order} className="p-3 text-center">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono border ${
+                                    isFinished
+                                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-bold'
+                                      : hasError
+                                      ? 'bg-red-500/10 border-red-500/30 text-red-400 font-bold'
+                                      : 'bg-[#121929] border-[#1e2940] text-slate-300'
+                                  }`}
+                                >
+                                  {stats.completed}/{stats.total} ({stats.percent}%)
+                                </span>
+                              </td>
+                            );
+                          })}
+
+                          <td className="p-3 text-right space-x-2 whitespace-nowrap font-mono">
+                            {activeTab === 'trainees' ? (
+                              <button
+                                onClick={() => handleChangeUserRole(u.userId, 'MEMBER', u.name || u.email)}
+                                className="px-2.5 py-1 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-[#080c14] border border-emerald-500/30 rounded text-xs transition-colors"
+                              >
+                                🎓 Promover
+                              </button>
+                            ) : (
                               <button
                                 onClick={() => handleChangeUserRole(u.userId, 'TRAINEE', u.name || u.email)}
-                                className="px-2.5 py-1 bg-[#141b2c] hover:bg-blue-950/60 text-slate-300 hover:text-blue-300 border border-[#202b42] rounded text-[11px] font-mono transition-colors"
-                                title="Reverter para modo Trainee guiado"
+                                className="px-2.5 py-1 bg-[#141b2c] hover:bg-blue-950/60 text-slate-300 hover:text-blue-300 border border-[#202b42] rounded text-xs transition-colors"
                               >
                                 Virar Trainee
                               </button>
-                              <button
-                                onClick={() => handleChangeUserRole(u.userId, 'ADMIN', u.name || u.email)}
-                                className="px-2.5 py-1 bg-purple-950/30 hover:bg-purple-900/50 text-purple-300 border border-purple-800/40 rounded text-[11px] font-mono transition-colors"
-                                title="Tornar Administrador"
-                              >
-                                + Admin
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                            )}
+
+                            <button
+                              onClick={() => setInspectUser(u)}
+                              className="px-2 py-1 bg-[#121929] hover:bg-[#1a253d] border border-[#1e2a42] text-slate-300 rounded text-xs transition-colors"
+                            >
+                              🔍 Ficha
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Paginação */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-xs font-mono text-slate-400 pt-2">
               <span>
-                Página {currentPage} de {totalPages}
+                Página {currentPage} de {totalPages} ({activeUserList.length} integrantes)
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -635,12 +910,12 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
       {/* Conteúdo da Tab 3: Aprovações Pendentes */}
       {activeTab === 'pending' && (
         <div className="space-y-4">
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-400 font-mono">
             Usuários que realizaram o 1º login e aguardam autorização da empresa para acessar a plataforma.
           </p>
 
           <div className="border border-[#1b2234] rounded-xl overflow-hidden bg-[#0e1422]">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs font-mono">
               <thead className="bg-[#0a0f1a] text-slate-300 border-b border-[#1b2234]">
                 <tr>
                   <th className="p-3 font-semibold">Usuário</th>
@@ -660,18 +935,18 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
                   pendingList.map((p) => (
                     <tr key={p.id} className="hover:bg-[#121929]">
                       <td className="p-3 font-semibold text-white">{p.name || 'Sem nome informado'}</td>
-                      <td className="p-3 text-slate-300 font-mono">{p.email}</td>
+                      <td className="p-3 text-slate-300">{p.email}</td>
                       <td className="p-3 text-slate-400">{new Date(p.createdAt).toLocaleDateString()}</td>
                       <td className="p-3 text-right space-x-2">
                         <button
                           onClick={() => handleApproveUser(p.id, 'TRAINEE')}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded text-xs transition-colors font-mono"
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded text-xs transition-colors"
                         >
                           Aprovar como Trainee
                         </button>
                         <button
                           onClick={() => handleApproveUser(p.id, 'MEMBER')}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded text-xs transition-colors font-mono"
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded text-xs transition-colors"
                         >
                           Aprovar como Membro
                         </button>
@@ -714,7 +989,7 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
                 type="text"
                 value={newUserName}
                 onChange={(e) => setNewUserName(e.target.value)}
-                placeholder="Nome do Aluno"
+                placeholder="Nome do Integrante"
                 className="w-full bg-[#080c14] border border-[#202b42] rounded-lg p-2.5 text-white focus:outline-none focus:border-emerald-500 font-sans"
               />
             </div>
@@ -766,7 +1041,128 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
         </div>
       )}
 
-      {/* Modal de Auditoria de Submissões com Mudança de Cargo (RF12 + Requisito 6) */}
+      {/* ======================================================== */}
+      {/* DRAWER / SLIDE-OVER LATERAL DE INSPEÇÃO DE INTEGRANTE    */}
+      {/* ======================================================== */}
+      {inspectUser && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-end">
+          <div className="bg-[#0e1422] border-l border-[#1b2234] max-w-xl w-full h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
+            {/* Header do Drawer */}
+            <div className="p-5 border-b border-[#1b2234] bg-[#0a0f1a] flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-mono font-bold text-base">
+                  {inspectUser.name ? inspectUser.name.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">{inspectUser.name || inspectUser.email}</h3>
+                  <div className="text-xs text-slate-400 font-mono">{inspectUser.email}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectUser(null)}
+                className="text-slate-400 hover:text-white font-mono p-1 text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Controle de Cargo no Drawer */}
+            <div className="p-4 bg-[#080c14] border-b border-[#1b2234] flex items-center justify-between font-mono text-xs">
+              <span className="text-slate-400">
+                Cargo Atual: <strong className="text-emerald-400">{inspectUser.role}</strong>
+              </span>
+              {inspectUser.role === 'TRAINEE' ? (
+                <button
+                  onClick={() =>
+                    handleChangeUserRole(inspectUser.userId, 'MEMBER', inspectUser.name || inspectUser.email)
+                  }
+                  className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-[#080c14] font-bold rounded text-xs transition-colors"
+                >
+                  🎓 Promover a Membro
+                </button>
+              ) : (
+                <button
+                  onClick={() =>
+                    handleChangeUserRole(inspectUser.userId, 'TRAINEE', inspectUser.name || inspectUser.email)
+                  }
+                  className="px-3 py-1 bg-[#141b2c] hover:bg-blue-950 text-slate-300 rounded text-xs border border-[#202b42] transition-colors"
+                >
+                  Mudar para Trainee
+                </button>
+              )}
+            </div>
+
+            {/* Conteúdo com scroll vertical interno */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1 font-mono text-xs">
+              {trackGroups.map((tg) => {
+                const stats = getUserTrackStats(inspectUser, tg);
+
+                return (
+                  <div key={tg.order} className="bg-[#090d18] border border-[#1b2234] rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between border-b border-[#162033] pb-2">
+                      <div className="flex items-center space-x-2">
+                        <span>{getTrackIcon(tg.order)}</span>
+                        <h4 className="font-bold text-white">
+                          Trilha {tg.order}: {tg.title}
+                        </h4>
+                      </div>
+                      <span className="text-emerald-400 font-bold">{stats.percent}%</span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {tg.stages.map((st) => {
+                        const cell = inspectUser.stages[st.slug];
+                        const isCompleted = cell?.status === 'COMPLETED';
+                        const hasAlert = cell?.hasCriticalFailures;
+
+                        return (
+                          <div
+                            key={st.slug}
+                            onClick={() => openAuditModal(inspectUser, st.slug)}
+                            className="p-2 rounded bg-[#0e1422] hover:bg-[#141d30] border border-[#182236] flex items-center justify-between cursor-pointer transition-colors"
+                          >
+                            <span className="text-slate-300">
+                              {st.stepNumber}. {st.title}
+                            </span>
+                            <span className="flex items-center space-x-1.5">
+                              {isCompleted ? (
+                                <span className="text-emerald-400">✔ Concluído</span>
+                              ) : hasAlert ? (
+                                <span className="text-red-400 animate-pulse font-bold">
+                                  🔴 {cell.attempts} falhas
+                                </span>
+                              ) : cell?.attempts ? (
+                                <span className="text-blue-400">{cell.attempts}x tentativas</span>
+                              ) : (
+                                <span className="text-slate-600">Pendente</span>
+                              )}
+                              <span className="text-slate-500 text-[10px]">→</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer do Drawer */}
+            <div className="p-4 border-t border-[#1b2234] bg-[#0a0f1a] text-right font-mono">
+              <button
+                onClick={() => setInspectUser(null)}
+                className="px-4 py-2 bg-[#141b2c] hover:bg-[#1a233a] border border-[#202b42] text-slate-200 text-xs rounded-lg"
+              >
+                Fechar Ficha
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL DE AUDITORIA DE SUBMISSÕES & LOGS DO ALUNO (RF12)  */}
+      {/* ======================================================== */}
       {auditUser && auditStageSlug && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0e1422] border border-[#1b2234] rounded-xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -789,32 +1185,6 @@ export function AdminDashboardClient({ initialData, pendingUsers: initialPending
               >
                 ✕
               </button>
-            </div>
-
-            {/* Ação rápida de promoção no próprio Modal de Auditoria */}
-            <div className="px-5 py-2.5 bg-[#0a0f1a] border-b border-[#1b2234] flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400">
-                Cargo atual: <strong className="text-white">{auditUser.role}</strong>
-              </span>
-              {auditUser.role === 'TRAINEE' ? (
-                <button
-                  onClick={() =>
-                    handleChangeUserRole(auditUser.userId, 'MEMBER', auditUser.name || auditUser.email)
-                  }
-                  className="px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-[#080c14] border border-emerald-500/30 rounded text-[11px] font-bold transition-all"
-                >
-                  🎓 Promover agora a Membro
-                </button>
-              ) : (
-                <button
-                  onClick={() =>
-                    handleChangeUserRole(auditUser.userId, 'TRAINEE', auditUser.name || auditUser.email)
-                  }
-                  className="px-3 py-1 bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 border border-blue-800/40 rounded text-[11px] transition-all"
-                >
-                  Reverter para Trainee
-                </button>
-              )}
             </div>
 
             <div className="p-6 overflow-y-auto space-y-4 flex-1">
