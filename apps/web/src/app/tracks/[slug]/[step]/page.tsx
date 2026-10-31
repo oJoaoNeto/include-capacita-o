@@ -1,4 +1,6 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { Role } from '@prisma/client';
 import { StageWorkspaceClient } from '@/components/StageWorkspaceClient';
@@ -13,8 +15,38 @@ export default async function StageDetailPage({
   searchParams: { as?: string };
 }) {
   const { slug: trackSlug, step: stageSlug } = params;
-  const simulatedRole = searchParams.as === 'member' ? Role.MEMBER : Role.TRAINEE;
 
+  // 1. Exige autenticação estrita para acessar micro-etapas
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    redirect(`/login?callbackUrl=${encodeURIComponent(`/tracks/${trackSlug}/${stageSlug}`)}`);
+  }
+
+  // 2. Busca o usuário real autenticado
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email.toLowerCase().trim() },
+    include: {
+      progress: true,
+    },
+  });
+
+  if (!user) {
+    redirect(`/login?callbackUrl=${encodeURIComponent(`/tracks/${trackSlug}/${stageSlug}`)}`);
+  }
+
+  if (user.role === Role.PENDING) {
+    redirect('/waiting-room');
+  }
+
+  // Se o usuário for ADMIN, permite simular visões pelo parâmetro ?as=
+  const effectiveRole =
+    user.role === Role.ADMIN && searchParams.as
+      ? searchParams.as === 'member'
+        ? Role.MEMBER
+        : Role.TRAINEE
+      : user.role;
+
+  // 3. Busca a trilha e valida existência
   const track = await prisma.track.findUnique({
     where: { slug: trackSlug },
     include: {
@@ -33,29 +65,21 @@ export default async function StageDetailPage({
     notFound();
   }
 
-  // Busca o usuário ativo com todo o progresso na trilha
-  const user = await prisma.user.findFirst({
-    where: { role: simulatedRole },
-    include: {
-      progress: true,
-    },
-  });
-
-  const progressMap = new Map(user?.progress.map((p) => [p.stageId, p]) || []);
+  const progressMap = new Map(user.progress.map((p) => [p.stageId, p]));
   const userProgress = progressMap.get(stage.id) || null;
 
-  // Lista de todas as etapas da trilha com status para a barra de navegação CodeCrafters
+  // 4. Lista todas as etapas da trilha com status real para o Stepper CodeCrafters
   const trackStages = track.stages.map((s) => {
     const prog = progressMap.get(s.id);
     return {
       slug: s.slug,
       stepNumber: s.stepNumber,
       title: s.title,
-      status: prog?.status || (simulatedRole === Role.MEMBER ? 'IN_PROGRESS' : 'LOCKED'),
+      status: prog?.status || (effectiveRole === Role.MEMBER || effectiveRole === Role.ADMIN ? 'IN_PROGRESS' : 'LOCKED'),
     };
   });
 
-  // Próxima etapa
+  // Próxima e anterior
   const currentIndex = track.stages.findIndex((s) => s.id === stage.id);
   const nextStage = currentIndex >= 0 && currentIndex + 1 < track.stages.length
     ? track.stages[currentIndex + 1]
@@ -92,8 +116,8 @@ export default async function StageDetailPage({
             }
           : null
       }
-      cliToken={user?.cliToken || 'trainee-cli-token-demo-5678'}
-      userRole={user?.role || simulatedRole}
+      cliToken={user.cliToken}
+      userRole={effectiveRole}
       nextStageSlug={nextStage ? nextStage.slug : null}
       prevStageSlug={prevStage ? prevStage.slug : null}
     />

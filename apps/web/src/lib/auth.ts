@@ -22,37 +22,53 @@ export const authOptions: NextAuthOptions = {
       },
     }),
 
-    // 2. Provedor de Demonstração / Homologação (quando habilitado)
-    ...(process.env.ENABLE_DEMO_AUTH === 'true' || process.env.NODE_ENV !== 'production'
-      ? [
-          CredentialsProvider({
-            id: 'demo-credentials',
-            name: 'Acesso Rápido de Demonstração',
-            credentials: {
-              email: { label: 'E-mail', type: 'email', placeholder: 'trainee@ej.com' },
+    // 2. Provedor Universal com E-mail (Credenciais)
+    // Permite login institucional direto para membros e trainees pré-cadastrados ou auto-registro
+    CredentialsProvider({
+      id: 'email-credentials',
+      name: 'E-mail Institucional',
+      credentials: {
+        email: { label: 'E-mail', type: 'email', placeholder: 'usuario@empresa.com' },
+        name: { label: 'Nome Completo', type: 'text', placeholder: 'Seu Nome' },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email) return null;
+
+        const normalizedEmail = credentials.email.toLowerCase().trim();
+        if (!normalizedEmail.includes('@')) return null;
+
+        let user = await prisma.user.findUnique({
+          where: { email: normalizedEmail },
+        });
+
+        // Se o usuário não existir no banco, cria como PENDING (ou ADMIN se for o primeiro usuário)
+        if (!user) {
+          const totalUsers = await prisma.user.count();
+          const initialRole = totalUsers === 0 ? Role.ADMIN : Role.PENDING;
+
+          user = await prisma.user.create({
+            data: {
+              email: normalizedEmail,
+              name: credentials.name || normalizedEmail.split('@')[0],
+              role: initialRole,
+              cliToken: crypto.randomUUID(),
+              cohort: initialRole === Role.ADMIN ? 'Gestão da Empresa' : 'Novos Ingressantes',
             },
-            async authorize(credentials) {
-              if (!credentials?.email) return null;
+          });
+        }
 
-              const user = await prisma.user.findUnique({
-                where: { email: credentials.email.toLowerCase().trim() },
-              });
-
-              if (!user) return null;
-
-              return {
-                id: user.id,
-                email: user.email,
-                name: user.name || user.email,
-                image: user.avatarUrl,
-                role: user.role,
-                cliToken: user.cliToken,
-                cohort: user.cohort,
-              };
-            },
-          }),
-        ]
-      : []),
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name || user.email,
+          image: user.avatarUrl,
+          role: user.role,
+          cliToken: user.cliToken,
+          cohort: user.cohort,
+          trainingRepoId: user.trainingRepoId,
+        };
+      },
+    }),
   ],
   callbacks: {
     async signIn({ user, account, profile }) {
@@ -60,48 +76,48 @@ export const authOptions: NextAuthOptions = {
       const normalizedEmail = user.email.toLowerCase().trim();
 
       try {
-        const gitlabProfile = profile as any;
-        const gitlabUserId = gitlabProfile?.id ? Number(gitlabProfile.id) : undefined;
-        const gitlabUsername = gitlabProfile?.username;
-        const gitlabToken = account?.access_token;
-        const avatarUrl = user.image || gitlabProfile?.avatar_url;
+        // Se a autenticação foi via GitLab OAuth, sincroniza dados do GitLab
+        if (account?.provider === 'gitlab') {
+          const gitlabProfile = profile as any;
+          const gitlabUserId = gitlabProfile?.id ? Number(gitlabProfile.id) : undefined;
+          const gitlabUsername = gitlabProfile?.username;
+          const gitlabToken = account?.access_token;
+          const avatarUrl = user.image || gitlabProfile?.avatar_url;
 
-        // Busca se usuário já existe (por email ou gitlabUserId)
-        const existingUser = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { email: normalizedEmail },
-              ...(gitlabUserId ? [{ gitlabUserId }] : []),
-            ],
-          },
-        });
-
-        if (existingUser) {
-          // Atualiza dados sincronizados do GitLab mantendo o papel (Role) e Turma (Cohort)
-          await prisma.user.update({
-            where: { id: existingUser.id },
-            data: {
-              name: user.name || existingUser.name,
-              avatarUrl: avatarUrl || existingUser.avatarUrl,
-              gitlabUserId: gitlabUserId || existingUser.gitlabUserId,
-              gitlabUsername: gitlabUsername || existingUser.gitlabUsername,
-              gitlabToken: gitlabToken || existingUser.gitlabToken,
+          const existingUser = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { email: normalizedEmail },
+                ...(gitlabUserId ? [{ gitlabUserId }] : []),
+              ],
             },
           });
-        } else {
-          // Novo usuário não pré-cadastrado entra com Role PENDING (RF02)
-          await prisma.user.create({
-            data: {
-              email: normalizedEmail,
-              name: user.name || gitlabUsername || 'Novo Usuário',
-              avatarUrl,
-              gitlabUserId,
-              gitlabUsername,
-              gitlabToken,
-              role: Role.PENDING,
-              cliToken: crypto.randomUUID(),
-            },
-          });
+
+          if (existingUser) {
+            await prisma.user.update({
+              where: { id: existingUser.id },
+              data: {
+                name: user.name || existingUser.name,
+                avatarUrl: avatarUrl || existingUser.avatarUrl,
+                gitlabUserId: gitlabUserId || existingUser.gitlabUserId,
+                gitlabUsername: gitlabUsername || existingUser.gitlabUsername,
+                gitlabToken: gitlabToken || existingUser.gitlabToken,
+              },
+            });
+          } else {
+            await prisma.user.create({
+              data: {
+                email: normalizedEmail,
+                name: user.name || gitlabUsername || 'Novo Usuário',
+                avatarUrl,
+                gitlabUserId,
+                gitlabUsername,
+                gitlabToken,
+                role: Role.PENDING,
+                cliToken: crypto.randomUUID(),
+              },
+            });
+          }
         }
 
         return true;
@@ -112,6 +128,7 @@ export const authOptions: NextAuthOptions = {
     },
 
     async jwt({ token, user }) {
+      // Se acabou de fazer login ou atualizou token
       if (user?.email) {
         const dbUser = await prisma.user.findUnique({
           where: { email: user.email.toLowerCase().trim() },
@@ -130,11 +147,11 @@ export const authOptions: NextAuthOptions = {
 
     async session({ session, token }) {
       if (session.user && token) {
-        (session.user as any).id = token.id;
-        (session.user as any).role = token.role;
-        (session.user as any).cliToken = token.cliToken;
-        (session.user as any).cohort = token.cohort;
-        (session.user as any).trainingRepoId = token.trainingRepoId;
+        session.user.id = (token.id as string) || '';
+        session.user.role = token.role as Role;
+        session.user.cliToken = (token.cliToken as string) || '';
+        session.user.cohort = token.cohort || null;
+        session.user.trainingRepoId = token.trainingRepoId || null;
       }
       return session;
     },

@@ -82,7 +82,7 @@ export default async function HomePage() {
                   href="/admin"
                   className="px-5 py-3 rounded-lg bg-[#111726] hover:bg-[#161f33] text-slate-300 hover:text-white border border-[#212b42] text-sm font-medium transition-colors"
                 >
-                  Painel de Gestão (Admin)
+                  Gestão da Empresa
                 </Link>
               </div>
 

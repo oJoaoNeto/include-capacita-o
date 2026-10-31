@@ -43,12 +43,9 @@ export async function middleware(req: NextRequest) {
   }
 
   // 2. Proteção de Rotas de Aprendizado (/learn e /tracks)
-  if (pathname.startsWith('/learn') || pathname.startsWith('/tracks')) {
-    // Se não estiver logado, permite em desenvolvimento/modo demo com fallback ou redireciona
+  if (pathname.startsWith('/learn') || pathname.startsWith('/tracks') || pathname.startsWith('/profile')) {
+    // Bloqueia qualquer acesso sem autenticação válida
     if (!token) {
-      if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEMO_AUTH === 'true') {
-        return NextResponse.next();
-      }
       const loginUrl = new URL('/login', req.url);
       loginUrl.searchParams.set('callbackUrl', pathname);
       return NextResponse.redirect(loginUrl);
@@ -64,6 +61,12 @@ export async function middleware(req: NextRequest) {
 
   // 3. Sala de Espera (/waiting-room)
   if (pathname.startsWith('/waiting-room')) {
+    if (!token) {
+      const loginUrl = new URL('/login', req.url);
+      loginUrl.searchParams.set('callbackUrl', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+
     if (token && role && role !== 'PENDING') {
       // Usuário já aprovado não precisa ficar na sala de espera
       return NextResponse.redirect(new URL('/learn', req.url));
