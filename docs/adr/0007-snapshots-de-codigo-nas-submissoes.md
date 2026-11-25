@@ -8,7 +8,7 @@
 ## Contexto e Forças Motrizes
 
 Hoje cada submissão guarda só o resultado (`passed`), a mensagem (`feedbackMsg`) e um
-log textual curto (`rawLogs`) gerado pelos validadores. Mentores não conseguem ver
+log textual curto (`rawLogs`) gerado pelos validadores. Os admins não conseguem ver
 **o que o usuário realmente escreveu**: o `Dockerfile`, a resolução do conflito, os
 commits feitos. O próprio usuário também não consegue rever o que mudou entre uma
 tentativa e outra.
@@ -40,7 +40,7 @@ Restrições:
 
 Optamos por **a CLI anexar um snapshot de código a cada `ej-cap verify`** (e o backend
 gerar o equivalente nas etapas do GitLab), guardado junto da submissão e exibido num
-visualizador de diffs. Visível para **admins/mentores**, para **o próprio usuário** e,
+visualizador de diffs. Visível para **admins**, para **o próprio usuário** e,
 **apenas a solução aprovada**, para **colegas que já concluíram a mesma etapa**.
 
 ### 1. O que é capturado em cada trilha
@@ -76,8 +76,9 @@ Abordagem de **lista restrita**, nunca "a pasta toda":
 - **Transparência:** a cada `verify`, a CLI imprime a lista de arquivos enviados
   (`📎 Snapshot: Dockerfile, index.html (2 arquivos, 3 KB)`). No primeiro uso, mostra um
   aviso explicando o que é enviado e quem vê.
-- `ej-cap verify --no-snapshot` envia a submissão sem código; o histórico mostra
-  "snapshot não enviado". Sugestão: permitido para todos, mas visível ao mentor.
+- **O envio é obrigatório.** Não existe opção para enviar a submissão sem o snapshot:
+  todo `verify` envia o código, já filtrado pelas regras acima. Uma submissão da CLI
+  sem snapshot é recusada pelo backend (exceto etapas sem código, como 2.1).
 
 ### 3. Modelo de dados
 
@@ -131,7 +132,7 @@ snapshot é montado em `gitlab-client.ts` na mesma chamada de validação.
 
 | Quem | O que pode ver |
 |---|---|
-| **Admin/mentor** | Snapshot de **todas** as tentativas (certas e erradas) de qualquer usuário, no histórico de submissões do painel (RF12), ao lado do log de erro. |
+| **Admin** | Snapshot de **todas** as tentativas (certas e erradas) de qualquer usuário, no histórico de submissões do painel (RF12), ao lado do log de erro. |
 | **O próprio usuário** | Snapshot de **todas as suas** tentativas, na aba de histórico da etapa, com opção "comparar com a tentativa anterior". |
 | **Colegas** | Só a **solução aprovada** (a primeira submissão `passed` da etapa) de outros usuários, e **só depois de concluírem a mesma etapa**. Nunca tentativas erradas, nunca `rawLogs`. Usuários com `shareSolutions = false` não aparecem. `PENDING` não vê nada. |
 
@@ -189,6 +190,6 @@ a solução de uma etapa que ainda não fez.
 ## Documentos a atualizar quando implementado
 - `PRD_inclu_capacitacao.md` — RF12 (auditoria com diffs) e novo requisito de soluções
   da comunidade; schema da seção 7.
-- `docs/api/cli-protocol.md` — campo `snapshot` e flag `--no-snapshot`.
+- `docs/api/cli-protocol.md` — campo `snapshot` (obrigatório nas etapas com código).
 - `.agents/skills/cli-validation/SKILL.md` — regras de coleta e exclusão.
 - Cápsulas teóricas / guia do aluno — aviso sobre o que a CLI envia.

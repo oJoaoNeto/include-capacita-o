@@ -258,7 +258,7 @@ Detalhado na **[ADR 0006](../adr/0006-sistema-de-conquistas.md)**. Resumo:
 Detalhado na **[ADR 0007](../adr/0007-snapshots-de-codigo-nas-submissoes.md)**. Resumo:
 - A cada `ej-cap verify` (acertando ou errando), a CLI envia um snapshot filtrado do
   código do exercício; na Trilha 2 o backend monta o diff pela API do GitLab.
-- Visível para admins/mentores (todas as tentativas), para o próprio usuário (todas as
+- Envio obrigatório em todo `verify`. Visível para admins (todas as tentativas), para o próprio usuário (todas as
   suas) e para colegas (só a solução aprovada, após concluírem a mesma etapa).
 - Coleta restrita à pasta do exercício, sem `.env`/chaves, com remoção de segredos e
   limite de tamanho. Depende da Fase 1 (segurança).
