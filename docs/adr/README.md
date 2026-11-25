@@ -9,6 +9,7 @@
 | [0005](0005-videos-youtube-incorporados.md) | Vídeos das Capacitações Hospedados no YouTube e Incorporados nas Etapas | Proposta |
 | [0006](0006-sistema-de-conquistas.md) | Sistema de Conquistas (Troféus por Capacitação Concluída) | Proposta |
 | [0007](0007-snapshots-de-codigo-nas-submissoes.md) | Snapshots de Código (Diffs) em Todas as Submissões | Proposta |
+| [0008](0008-comentarios-nas-etapas.md) | Comentários nas Etapas com Proteção Contra Respostas Prontas | Proposta |
 
 Template e convenções: `.agents/skills/architecture-decisions/SKILL.md`.
 Plano geral de melhorias: [`docs/roadmap/plano-de-melhorias.md`](../roadmap/plano-de-melhorias.md).

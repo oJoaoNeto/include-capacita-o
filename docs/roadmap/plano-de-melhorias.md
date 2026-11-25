@@ -263,7 +263,15 @@ Detalhado na **[ADR 0007](../adr/0007-snapshots-de-codigo-nas-submissoes.md)**. 
 - Coleta restrita à pasta do exercício, sem `.env`/chaves, com remoção de segredos e
   limite de tamanho. Depende da Fase 1 (segurança).
 
-### 3.6 Painel de gestão
+### 3.6 Comentários nas etapas
+Detalhado na **[ADR 0008](../adr/0008-comentarios-nas-etapas.md)**. Resumo:
+- Aba "Discussão" por etapa, com comentários do tipo Dúvida, Dica ou Solução e respostas.
+- Soluções só visíveis para quem concluiu a etapa; trechos podem ser marcados como spoiler.
+- Detecção automática de possíveis respostas (semelhança com a última dica, com soluções
+  aprovadas e padrões opcionais): o comentário vira spoiler e vai para moderação.
+- Denúncias e fila de moderação para os admins (não há papel de mentor por enquanto).
+
+### 3.7 Painel de gestão
 - Tratar o desenvolvimento dos membros como visão central, não aba secundária.
 - Alertas de travamento (3+ falhas) continuam para trainees; para membros, mostrar
   atividade e evolução sem tom de cobrança.
