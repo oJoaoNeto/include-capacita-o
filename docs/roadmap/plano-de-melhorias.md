@@ -254,7 +254,16 @@ Detalhado na **[ADR 0006](../adr/0006-sistema-de-conquistas.md)**. Resumo:
 - Aparência opcional no `track.json` (campo `trophy`); toda trilha tem um troféu padrão.
 - Sem pontos e sem ranking. Depende da Fase 1 (segurança) para ser confiável.
 
-### 3.5 Painel de gestão
+### 3.5 Diffs do código em todas as submissões
+Detalhado na **[ADR 0007](../adr/0007-snapshots-de-codigo-nas-submissoes.md)**. Resumo:
+- A cada `ej-cap verify` (acertando ou errando), a CLI envia um snapshot filtrado do
+  código do exercício; na Trilha 2 o backend monta o diff pela API do GitLab.
+- Visível para admins/mentores (todas as tentativas), para o próprio usuário (todas as
+  suas) e para colegas (só a solução aprovada, após concluírem a mesma etapa).
+- Coleta restrita à pasta do exercício, sem `.env`/chaves, com remoção de segredos e
+  limite de tamanho. Depende da Fase 1 (segurança).
+
+### 3.6 Painel de gestão
 - Tratar o desenvolvimento dos membros como visão central, não aba secundária.
 - Alertas de travamento (3+ falhas) continuam para trainees; para membros, mostrar
   atividade e evolução sem tom de cobrança.
