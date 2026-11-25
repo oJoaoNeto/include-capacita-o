@@ -108,7 +108,15 @@ Detalhado na **[ADR 0005](../adr/0005-videos-youtube-incorporados.md)**. Resumo:
 - Player com carregamento sob demanda (miniatura → iframe ao clicar) via `youtube-nocookie.com`.
 - Vídeo complementa a teoria; não é critério de conclusão da etapa.
 
-### 3.4 Painel de gestão
+### 3.4 Conquistas (troféus)
+Detalhado na **[ADR 0006](../adr/0006-sistema-de-conquistas.md)**. Resumo:
+- Ao concluir todas as etapas de uma trilha, o usuário ganha um troféu permanente.
+- Exibido em "Meu perfil" e num perfil interno (`/members/[id]`) visível aos membros
+  aprovados, com opção de ocultar.
+- Aparência opcional no `track.json` (campo `trophy`); toda trilha tem um troféu padrão.
+- Sem pontos e sem ranking. Depende da Fase 1 (segurança) para ser confiável.
+
+### 3.5 Painel de gestão
 - Tratar o desenvolvimento dos membros como visão central, não aba secundária.
 - Alertas de travamento (3+ falhas) continuam para trainees; para membros, mostrar
   atividade e evolução sem tom de cobrança.
