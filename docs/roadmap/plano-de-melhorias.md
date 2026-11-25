@@ -153,6 +153,86 @@ já concluiu nas trilhas validadas pela CLI (Git e Docker).
    e o campo `isReview` na resposta, para a CLI exibir "✔ Revisão concluída" em vez de
    "Etapa concluída / próxima desbloqueada".
 
+### 3.1.2 Dicas progressivas: liberação automática e revelação antecipada registrada
+
+**Decisão:** as dicas continuam sendo liberadas **automaticamente** conforme os erros
+(RF07). O usuário **pode revelar antes**, mas isso fica **registrado** e visível para a
+mentoria.
+
+**Problemas atuais (`StageWorkspaceClient.tsx`):**
+- O botão "Revelar agora" mostra qualquer dica na hora, só no navegador, sem registro.
+- A regra automática está fixa no código para as dicas 1 e 2; uma 3ª dica nunca é
+  liberada sozinha. Os rótulos "Conceitual" / "Sintaxe do Comando" também são fixos.
+- O texto de todas as dicas é enviado ao navegador mesmo bloqueadas (fica visível pelas
+  ferramentas de desenvolvedor), o que tornaria qualquer registro inútil.
+- Um erro na CLI não libera a dica na página já aberta até recarregar.
+- Tentativas de revisão (refazer etapa) contam como erro (ver 3.1.1).
+
+**Regra proposta:**
+
+| Situação | Comportamento |
+|---|---|
+| Dica *N* com *N* ou mais tentativas erradas | Liberada automaticamente. Não gera registro (é derivável das tentativas). |
+| Dica *N* antes disso | Botão "Revelar agora" → confirmação curta → dica liberada e **registrada como antecipada**. |
+| Ordem | Só é possível revelar a dica *N* depois da *N−1* (antecipada ou automática). |
+| Etapa já concluída / modo revisão | Todas as dicas liberadas, sem registro. |
+| Contagem de erros | Usa apenas as tentativas até a primeira conclusão (`attempts`), nunca revisões. |
+| Quantidade de dicas | A regra vale para qualquer número de dicas no `hints.json`. |
+
+Texto da confirmação, sem tom punitivo: *"Quer ver a dica agora? Tudo bem pedir ajuda —
+a mentoria vai ver que você usou esta dica, para poder te apoiar melhor."*
+
+**Modelo de dados:**
+
+```prisma
+model HintReveal {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stageId          String
+  stage            Stage    @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  hintIndex        Int
+  attemptsAtReveal Int      // quantas tentativas erradas havia no momento
+  revealedAt       DateTime @default(now())
+
+  @@unique([userId, stageId, hintIndex])
+}
+```
+
+Uma dica *N* está liberada se `attempts >= N` **ou** existe `HintReveal` para ela.
+
+**Servidor como fonte da verdade:**
+- A página da etapa envia ao navegador **só o texto das dicas liberadas**; as bloqueadas
+  vão apenas com índice e rótulo.
+- Nova rota `POST /api/stages/[slug]/hints/[index]/reveal` (sessão obrigatória): valida a
+  ordem, grava o `HintReveal` se ainda não estiver liberada automaticamente e devolve o
+  texto. Idempotente (revelar de novo não duplica o registro).
+- A resposta de submissão (CLI e GitLab) passa a incluir as dicas recém-liberadas.
+
+**Atualização da tela:** a página da etapa revalida os dados ao voltar o foco para a
+aba (`router.refresh()` no evento `focus`/`visibilitychange`), para que um erro no
+terminal libere a dica sem recarregar manualmente.
+
+**Formato do `hints.json` (compatível com o atual):** continua aceitando lista de textos;
+opcionalmente cada item pode ser um objeto com rótulo:
+
+```json
+[
+  { "label": "Conceitual", "text": "Lembre-se que..." },
+  { "label": "Sintaxe do comando", "text": "Digite exatamente..." }
+]
+```
+
+Sem rótulo, a tela mostra apenas "Dica 1", "Dica 2"...
+
+**Painel admin (RF11/RF12):**
+- Na matriz, a célula da etapa indica "💡 1 antecipada" quando houver revelações
+  antecipadas.
+- No histórico da etapa, as revelações aparecem na linha do tempo junto com as
+  submissões ("Revelou a Dica 2 antecipadamente, após 0 tentativas").
+- Revelação antecipada **não** conta como falha e **não** aciona o alerta 🔴. Para
+  `MEMBER`, aparece só no histórico, sem destaque na matriz.
+
 ### 3.2 Linguagem e telas para todos os públicos
 Cerca de 14 arquivos de interface e API usam "trainee" como sinônimo de usuário
 (página inicial, login, navbar, perfil, painel). Revisar textos para falarem com
