@@ -101,7 +101,14 @@ Cerca de 14 arquivos de interface e API usam "trainee" como sinônimo de usuári
 trainees e membros, e adaptar a home e o catálogo ao contexto de cada papel
 (guiado vs. livre).
 
-### 3.3 Painel de gestão
+### 3.3 Vídeos nas etapas
+Detalhado na **[ADR 0005](../adr/0005-videos-youtube-incorporados.md)**. Resumo:
+- Vídeos hospedados no YouTube como "não listados" num canal institucional da EJ.
+- Declarados no `stage.json` (campo opcional `videos`), sem mexer em código.
+- Player com carregamento sob demanda (miniatura → iframe ao clicar) via `youtube-nocookie.com`.
+- Vídeo complementa a teoria; não é critério de conclusão da etapa.
+
+### 3.4 Painel de gestão
 - Tratar o desenvolvimento dos membros como visão central, não aba secundária.
 - Alertas de travamento (3+ falhas) continuam para trainees; para membros, mostrar
   atividade e evolução sem tom de cobrança.
