@@ -44,6 +44,7 @@ começam com `/admin`, então passam direto, e os handlers não verificam sessã
 | `PATCH /api/admin/users/[id]/role` | Qualquer pessoa altera o papel de qualquer usuário (escalada para `ADMIN`). | `requireRole(ADMIN)` |
 | `GET /api/admin/matrix` | Expõe progresso e dados de todos os usuários. | `requireRole(ADMIN)` |
 | `GET /api/submissions/[userId]/[stageSlug]` | Qualquer pessoa lê submissões e logs brutos de qualquer usuário. | Sessão obrigatória; permitido só ao próprio usuário ou `ADMIN`. |
+| `POST /api/cli/submissions` | Aceita qualquer `stageSlug`, inclusive etapas futuras de um `TRAINEE`. A tela da etapa tem botões "Simular Pass/Fail" que usam essa rota com o `cliToken` do usuário, permitindo concluir etapas sem fazê-las. | Bloquear etapas futuras do `TRAINEE` no backend; remover os botões de simulação em produção (ver 3.1.1). |
 | `POST /api/stages/validate-gitlab` | Usa `userId` do corpo da requisição; sem ele, usa o primeiro `TRAINEE` do banco. Permite registrar submissões em nome de outros. | Usar **apenas** o usuário da sessão; remover o fallback de "usuário demo". |
 
 Rotas que já verificam sessão: `/api/user/profile`, `/api/user/cli-token`.
@@ -94,6 +95,63 @@ queira estudar Docker não consegue validar a etapa 3.2 sem antes concluir as tr
   `MEMBER`/`ADMIN` podem submeter qualquer uma.
 - A tela da etapa mostra o comando exato (`ej-cap verify docker-3-2`).
 - Atualizar `docs/api/cli-protocol.md`.
+
+### 3.1.1 Refazer etapas já concluídas
+
+**Problema:** hoje um membro (ou qualquer usuário) não consegue refazer uma etapa que
+já concluiu nas trilhas validadas pela CLI (Git e Docker).
+
+**Causa (no código):**
+- A tela da etapa sempre mostra `npx ej-cap verify`, sem argumento
+  (`StageWorkspaceClient.tsx`, `cliVerifyCommand`).
+- O `verify` pergunta ao servidor qual é a "etapa atual" (`getUserCurrentStage` em
+  `rbac.ts`), e o servidor sempre devolve uma etapa **não concluída**. Uma etapa
+  `COMPLETED` nunca é escolhida, então nunca pode ser validada de novo.
+- A Trilha 2 (GitLab) não tem esse bloqueio, porque o botão "Verificar Missão na Nuvem"
+  envia o `stageSlug` da tela.
+
+**Problemas relacionados encontrados:**
+- **Refazer distorce os números.** `processStageSubmission` soma +1 em `attempts` em
+  toda submissão, inclusive depois da conclusão. As tentativas de revisão se misturam com
+  as tentativas originais na matriz do admin e na liberação de dicas.
+- **O backend não impõe o bloqueio do `TRAINEE`.** `/api/cli/submissions` aceita
+  qualquer `stageSlug`; um trainee pode submeter etapas futuras (contraria RF05).
+- **Botões "Simular Pass/Fail" em produção.** O rodapé da etapa tem "ferramentas de
+  teste" que chamam `/api/cli/submissions` com o `cliToken` do próprio usuário. Qualquer
+  pessoa conclui qualquer etapa sem fazê-la.
+
+**Proposta:**
+
+1. **CLI:** `ej-cap verify [etapa]` (item 3.1). Sem argumento, mantém o comportamento
+   atual; com argumento, valida a etapa indicada, inclusive se já estiver concluída.
+2. **Tela da etapa concluída:** botão **"Refazer etapa"**, que coloca a tela em
+   *modo revisão*:
+   - mostra os comandos com a etapa explícita: `npx ej-cap setup <etapa>` (quando a etapa
+     tem cenário) e `npx ej-cap verify <etapa>`;
+   - recomenda rodar o `setup` numa pasta nova, para não misturar com o exercício anterior;
+   - todas as dicas ficam disponíveis (a pessoa já concluiu a etapa uma vez);
+   - indicador "Concluída em DD/MM · revisando".
+3. **Regras no backend** (`processStageSubmission`):
+   - Refazer **nunca desfaz a conclusão**: a etapa continua `COMPLETED`, o `completedAt`
+     original é mantido e um troféu já conquistado (ADR 0006) não é afetado.
+   - Submissões de etapa já concluída são marcadas como revisão: novo campo
+     `Submission.isReview Boolean @default(false)`, definido **pelo servidor** (não pelo
+     cliente).
+   - `attempts` passa a contar só as tentativas **até a primeira conclusão**. As revisões
+     ficam em `UserProgress.reviewCount` e `lastReviewedAt`.
+   - O alerta 🔴 de 3+ falhas e a liberação de dicas usam só as tentativas originais.
+4. **Quem pode refazer:**
+   - `MEMBER` e `ADMIN`: qualquer etapa, a qualquer momento.
+   - `TRAINEE`: qualquer etapa **já concluída**. Etapas futuras continuam bloqueadas, e
+     o backend passa a recusar submissões delas (403 com mensagem em português).
+5. **Remover os botões "Simular Pass/Fail"** de produção (ou exibi-los só com
+   `NODE_ENV=development`). Entra na Fase 1 (segurança).
+6. **Painel admin:** no histórico de submissões (RF12), as revisões aparecem marcadas
+   como "revisão". Na matriz, a célula de uma etapa concluída pode mostrar "↻ 2" para
+   quem a refez.
+7. **Protocolo da CLI:** documentar em `docs/api/cli-protocol.md` o argumento de etapa
+   e o campo `isReview` na resposta, para a CLI exibir "✔ Revisão concluída" em vez de
+   "Etapa concluída / próxima desbloqueada".
 
 ### 3.2 Linguagem e telas para todos os públicos
 Cerca de 14 arquivos de interface e API usam "trainee" como sinônimo de usuário
